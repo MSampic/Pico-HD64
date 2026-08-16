@@ -1,59 +1,148 @@
-name: Build
+name: Build Pico 2 N64 HDMI firmware
+
 on:
   push:
-    branches:
-      - n64
-      - main
-      - ci
+    branches: [ "n64" ]
+    tags: [ "v*" ]
   pull_request:
+    branches: [ "n64" ]
 
 env:
-  BUILD_TYPE: Release
+  PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+  PICO_SDK_TAG: "2.1.1"
+  ARM_GCC_RELEASE: "13.3.Rel1"
 
 jobs:
-  build:
+  # n64_hdmi: modo fijo en tiempo de compilación -> necesita un .uf2 por modo
+  build-single-mode:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [ 240P, 480P, 720P ]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Pico SDK
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PICO_SDK_PATH }}
+          key: pico-sdk-${{ env.PICO_SDK_TAG }}
+
+      - name: Clone Pico SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch ${{ env.PICO_SDK_TAG }} --depth 1 \
+            https://github.com/raspberrypi/pico-sdk.git "${{ env.PICO_SDK_PATH }}"
+          cd "${{ env.PICO_SDK_PATH }}"
+          git submodule update --init --depth 1
+
+      # Toolchain ARM oficial (self-contained, misma fuente compilador+libstdc++)
+      # en vez de apt-get, que en ubuntu-latest (24.04) trae versiones
+      # desalineadas de gcc-arm-none-eabi / libstdc++-arm-none-eabi-newlib
+      # y rompe con "fatal error: cstdlib: No such file or directory".
+      - name: Install Arm GNU Toolchain (arm-none-eabi-gcc)
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_RELEASE }}
+
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
+
+      - name: Configure n64_hdmi (${{ matrix.mode }})
+        run: >
+          cmake -S software/apps/n64_hdmi
+          -B build-n64_hdmi-${{ matrix.mode }}
+          -G Ninja
+          -DPICO_SDK_PATH=${{ env.PICO_SDK_PATH }}
+          -DN64_HDMI_MODE=${{ matrix.mode }}
+
+      - name: Build
+        run: ninja -C build-n64_hdmi-${{ matrix.mode }}
+
+      - name: Collect .uf2
+        run: |
+          mkdir -p out
+          cp build-n64_hdmi-${{ matrix.mode }}/n64_hdmi.uf2 \
+             out/n64_hdmi-${{ matrix.mode }}.uf2
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n64_hdmi-${{ matrix.mode }}
+          path: out/n64_hdmi-${{ matrix.mode }}.uf2
+
+  # n64_hdmi_osd_overlay: modo runtime-switchable -> un solo .uf2 universal
+  build-overlay:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-    - name: Install toolchain
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y gcc-arm-none-eabi ninja-build
+      - name: Cache Pico SDK
+        id: sdk-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.PICO_SDK_PATH }}
+          key: pico-sdk-${{ env.PICO_SDK_TAG }}
 
-    - name: Checkout pico-sdk
-      uses: actions/checkout@v4
-      with:
-        repository: raspberrypi/pico-sdk
-        path: pico-sdk
-        submodules: true
+      - name: Clone Pico SDK
+        if: steps.sdk-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --branch ${{ env.PICO_SDK_TAG }} --depth 1 \
+            https://github.com/raspberrypi/pico-sdk.git "${{ env.PICO_SDK_PATH }}"
+          cd "${{ env.PICO_SDK_PATH }}"
+          git submodule update --init --depth 1
 
-    - name: Build apps/n64_hdmi (240p / 480p / 720p)
-      env:
-        PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
-      run: |
-        for mode in 240P 480P 720P; do
-          cmake -S software/apps/n64_hdmi -B build-n64-hdmi-$mode -G Ninja \
-            -DPICO_SDK_PATH=$PICO_SDK_PATH -DN64_HDMI_MODE=$mode
-          cmake --build build-n64-hdmi-$mode
-          mkdir -p artifacts
-          cp build-n64-hdmi-$mode/n64_hdmi.uf2 artifacts/n64_hdmi-$mode.uf2
-        done
+      - name: Install Arm GNU Toolchain (arm-none-eabi-gcc)
+        uses: carlosperate/arm-none-eabi-gcc-action@v1
+        with:
+          release: ${{ env.ARM_GCC_RELEASE }}
 
-    - name: Build apps/n64_hdmi_osd_overlay (240p-default / 480p-default / 720p-default)
-      env:
-        PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
-      run: |
-        for mode in 240P 480P 720P; do
-          cmake -S software/apps/n64_hdmi_osd_overlay -B build-n64-hdmi-osd-$mode -G Ninja \
-            -DPICO_SDK_PATH=$PICO_SDK_PATH -DN64_HDMI_MODE=$mode
-          cmake --build build-n64-hdmi-osd-$mode
-          cp build-n64-hdmi-osd-$mode/n64_hdmi_osd_overlay.uf2 artifacts/n64_hdmi_osd_overlay-$mode.uf2
-        done
+      - name: Install Ninja
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ninja-build
 
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: n64-picohdmi
-        path: artifacts/*
+      - name: Configure n64_hdmi_osd_overlay
+        run: >
+          cmake -S software/apps/n64_hdmi_osd_overlay
+          -B build-overlay
+          -G Ninja
+          -DPICO_SDK_PATH=${{ env.PICO_SDK_PATH }}
+
+      - name: Build
+        run: ninja -C build-overlay
+
+      - name: Collect .uf2
+        run: |
+          mkdir -p out
+          cp build-overlay/n64_hdmi_osd_overlay.uf2 out/n64_hdmi_osd_overlay.uf2
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: n64_hdmi_osd_overlay
+          path: out/n64_hdmi_osd_overlay.uf2
+
+  release:
+    needs: [ build-single-mode, build-overlay ]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten .uf2 files
+        run: |
+          mkdir -p release
+          find artifacts -name "*.uf2" -exec cp {} release/ \;
+          ls -la release
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.uf2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
