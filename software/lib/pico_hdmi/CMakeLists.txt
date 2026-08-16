@@ -1,0 +1,97 @@
+option(PICO_HDMI_RUNTIME_MODES "Use runtime video mode switching (video_output_rt)" OFF)
+option(PICO_HDMI_RT_RUNTIME_MODE_ATTRS "Allow runtime modes with different sync polarity and Data Island placement" OFF)
+option(PICO_HDMI_DUMP_COMMAND_LISTS "Print generated HDMI/HSTX command lists at startup" OFF)
+option(PICO_HDMI_LINE_BUFFER_IN_SCRATCH_Y "Place the HDMI active-line DMA buffer in scratch Y RAM" OFF)
+option(PICO_HDMI_PRECOMPOSED_ACTIVE_LINES "Enable precomposed HDMI active-line templates and native 16-bit scanout support" OFF)
+option(PICO_HDMI_EXACT_AUDIO_PACING "Pace audio Data Islands with an exact rational accumulator (eliminates fixed-point drift vs ACR)" ON)
+option(PICO_HDMI_FRANK_PAD_CONFIG "Use Frank-style HSTX pads: 2 mA drive, slow slew, input buffers disabled" OFF)
+option(PICO_HDMI_EXPLICIT_AUDIO_CHANNEL_STATUS
+    "EXPERIMENTAL: emit explicit IEC 60958 consumer PCM/48k channel-status bits in audio sample packets" OFF)
+# FEASIBILITY SPIKE (default OFF): switch the video_output_rt.c active-line
+# scanout path from packed RGB565 (2 pixels/32-bit word) to one 32-bit
+# RGB888 word per pixel. Only affects the runtime (video_output_rt.c)
+# backend; the compile-time video_output.c backend is untouched.
+option(PICO_HDMI_PIXEL_FORMAT_RGB888
+    "EXPERIMENTAL: active-line HSTX scanout uses one 32-bit RGB888 word per pixel instead of packed RGB565" OFF)
+# FEASIBILITY SPIKE (default OFF): pipeline the active-line scanout for the
+# mode whose v_active_lines==720 (3x vertical scale, e.g. runtime 720p)
+# across two line buffers. The ISR only swaps a front/back index and queues a
+# deferred fill request at each 3-line group boundary; the actual (expensive)
+# scanline callback runs from the Core 1 background loop (thread context, not
+# the ISR), so it gets a full 3-line-period budget instead of 1. Other modes
+# (2x/4x) are unaffected even when this is on. See video_output_rt.c.
+option(PICO_HDMI_ACTIVE_LINE_DOUBLE_BUFFER
+    "EXPERIMENTAL: pipeline the 3x (720p-class) active-line scanout across two buffers, decoupling the scanline callback from the per-line ISR deadline" OFF)
+set(PICO_HDMI_HSTX_CLK_DIV "" CACHE STRING "Override MODE_HSTX_CLK_DIV; empty keeps mode default")
+# 240p AVI InfoFrame: advertise pixel_repetition=0 instead of the default 3
+# (4x). Set ON when the source really transmits 640 distinct samples per
+# line (2x-repeated over the 1280 HSTX pixels) and the sink decimates per
+# the AVI field, which would otherwise collapse the image to 320 wide.
+option(PICO_HDMI_LEGACY_240P_AVI_INFOFRAME
+    "240p AVI InfoFrame: pixel_repetition 0 (legacy) instead of 3" OFF)
+# Overclocked 240p: divide the HSTX clock by 2 so the 240p pixel clock stays
+# at 25.2 MHz while sys_clk is raised (e.g. 252 MHz for capture headroom).
+# Defines PICO_HDMI_240P_HSTX_CLK_DIV=2 for the video_mode_240_p descriptor.
+option(PICO_HDMI_240P_HSTX_CLK_DIV2
+    "240p at raised sys_clk: HSTX clock /2 (pixel clock stays 25.2 MHz)" OFF)
+
+if(PICO_HDMI_RUNTIME_MODES)
+    set(PICO_HDMI_VIDEO_OUTPUT_SRC src/video_output_rt.c)
+else()
+    set(PICO_HDMI_VIDEO_OUTPUT_SRC src/video_output.c)
+endif()
+
+add_library(pico_hdmi
+    ${PICO_HDMI_VIDEO_OUTPUT_SRC}
+    src/hstx_data_island_queue.c
+    src/hstx_packet.c
+    src/hstx_pins.c
+)
+
+target_include_directories(pico_hdmi PUBLIC
+    ${CMAKE_CURRENT_LIST_DIR}/include
+)
+
+target_link_libraries(pico_hdmi
+    pico_stdlib
+    hardware_clocks
+    hardware_dma
+    hardware_irq
+    hardware_gpio
+)
+
+target_compile_definitions(pico_hdmi PUBLIC
+    PICO_HDMI_LINE_BUFFER_IN_SCRATCH_Y=$<BOOL:${PICO_HDMI_LINE_BUFFER_IN_SCRATCH_Y}>
+    PICO_HDMI_PRECOMPOSED_ACTIVE_LINES=$<BOOL:${PICO_HDMI_PRECOMPOSED_ACTIVE_LINES}>
+    PICO_HDMI_EXACT_AUDIO_PACING=$<BOOL:${PICO_HDMI_EXACT_AUDIO_PACING}>
+    PICO_HDMI_FRANK_PAD_CONFIG=$<BOOL:${PICO_HDMI_FRANK_PAD_CONFIG}>
+    PICO_HDMI_PIXEL_FORMAT_RGB888=$<BOOL:${PICO_HDMI_PIXEL_FORMAT_RGB888}>
+)
+
+target_compile_definitions(pico_hdmi PRIVATE
+    PICO_HDMI_EXPLICIT_AUDIO_CHANNEL_STATUS=$<BOOL:${PICO_HDMI_EXPLICIT_AUDIO_CHANNEL_STATUS}>
+)
+
+if(PICO_HDMI_HSTX_CLK_DIV)
+    target_compile_definitions(pico_hdmi PUBLIC MODE_HSTX_CLK_DIV=${PICO_HDMI_HSTX_CLK_DIV})
+endif()
+
+if(PICO_HDMI_DUMP_COMMAND_LISTS)
+    target_compile_definitions(pico_hdmi PRIVATE PICO_HDMI_DUMP_COMMAND_LISTS=1)
+endif()
+
+if(PICO_HDMI_RT_RUNTIME_MODE_ATTRS)
+    target_compile_definitions(pico_hdmi PRIVATE PICO_HDMI_RT_RUNTIME_MODE_ATTRS=1)
+endif()
+
+if(PICO_HDMI_ACTIVE_LINE_DOUBLE_BUFFER)
+    target_compile_definitions(pico_hdmi PRIVATE PICO_HDMI_ACTIVE_LINE_DOUBLE_BUFFER=1)
+endif()
+
+if(PICO_HDMI_LEGACY_240P_AVI_INFOFRAME)
+    target_compile_definitions(pico_hdmi PRIVATE PICO_HDMI_LEGACY_240P_AVI_INFOFRAME=1)
+endif()
+
+if(PICO_HDMI_240P_HSTX_CLK_DIV2)
+    target_compile_definitions(pico_hdmi PRIVATE PICO_HDMI_240P_HSTX_CLK_DIV=2)
+endif()

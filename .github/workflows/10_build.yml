@@ -3,103 +3,57 @@ on:
   push:
     branches:
       - n64
-      - n64-audio
-      - n64-audio-osd
+      - main
       - ci
+  pull_request:
 
 env:
-  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: Release
-  # TODO: eventually should set the PICO_SDK_PATH here
-  # PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-
-    - name: Clean workspace
-      run: |
-        echo "Cleaning up previous run"
-        rm -rf "${{ github.workspace }}"
-        mkdir -p "${{ github.workspace }}"
-
     - name: Checkout
-      uses: actions/checkout@v2
-      with:
-        repository: ${{ github.event.pull_request.head.repo.full_name }}
-        ref: ${{ github.head_ref }}
-        path: picodvi
+      uses: actions/checkout@v4
 
-    - name: Build picodvi using the pico-sdk-builder docker image
+    - name: Install toolchain
       run: |
-        docker run \
-        --mount type=bind,source=$(pwd),target=/ci \
-        --workdir=/ci \
-        ghcr.io/kbeckmann/pico-sdk-builder:latest \
-        bash -c "\
-          git config --global --add safe.directory /ci/picodvi                     && \
-          mkdir /ci/artifacts                                                      && \
-          cd picodvi/software                                                      && \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_96000_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_555                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-96000hz-rgb555.uf2   && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64.uf2                  && \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_96000_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_565                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-96000hz-rgb565.uf2   && \
-                                                                                      \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_48000_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_555                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-48000hz-rgb555.uf2   && \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_48000_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_565                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-48000hz-rgb565.uf2   && \
-                                                                                      \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_44100_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_555                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-44100hz-rgb555.uf2   && \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_44100_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_565                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-44100hz-rgb565.uf2   && \
-                                                                                      \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_32000_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_555                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-32000hz-rgb555.uf2   && \
-                                                                                      \
-          cmake -B build                                                              \
-            -DCONFIG_DEFAULT_SAMPLE_RATE_HZ=SAMPLE_RATE_32000_HZ                      \
-            -DCONFIG_DEFAULT_COLOR_DEPTH=DVI_RGB_565                               && \
-          cmake --build build                                                      && \
-          cp build/apps/n64/n64.uf2 /ci/artifacts/picodvi-n64-32000hz-rgb565.uf2      \
-                                                                                      \
-                                                                                      \
-          "
+        sudo apt-get update
+        sudo apt-get install -y gcc-arm-none-eabi ninja-build
 
-    - name: Upload picodvi binaries with a bundled test rom to artifacts
-      uses: actions/upload-artifact@v2
+    - name: Checkout pico-sdk
+      uses: actions/checkout@v4
       with:
-        name: PicoDVI-N64
-        path: |
-          ${{ github.workspace }}/artifacts/*
+        repository: raspberrypi/pico-sdk
+        path: pico-sdk
+        submodules: true
+
+    - name: Build apps/n64_hdmi (240p / 480p / 720p)
+      env:
+        PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+      run: |
+        for mode in 240P 480P 720P; do
+          cmake -S software/apps/n64_hdmi -B build-n64-hdmi-$mode -G Ninja \
+            -DPICO_SDK_PATH=$PICO_SDK_PATH -DN64_HDMI_MODE=$mode
+          cmake --build build-n64-hdmi-$mode
+          mkdir -p artifacts
+          cp build-n64-hdmi-$mode/n64_hdmi.uf2 artifacts/n64_hdmi-$mode.uf2
+        done
+
+    - name: Build apps/n64_hdmi_osd_overlay (240p-default / 480p-default / 720p-default)
+      env:
+        PICO_SDK_PATH: ${{ github.workspace }}/pico-sdk
+      run: |
+        for mode in 240P 480P 720P; do
+          cmake -S software/apps/n64_hdmi_osd_overlay -B build-n64-hdmi-osd-$mode -G Ninja \
+            -DPICO_SDK_PATH=$PICO_SDK_PATH -DN64_HDMI_MODE=$mode
+          cmake --build build-n64-hdmi-osd-$mode
+          cp build-n64-hdmi-osd-$mode/n64_hdmi_osd_overlay.uf2 artifacts/n64_hdmi_osd_overlay-$mode.uf2
+        done
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: n64-picohdmi
+        path: artifacts/*

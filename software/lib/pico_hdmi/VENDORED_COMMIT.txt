@@ -1,0 +1,3 @@
+n64-picohdmi vendors fliperama86/pico_hdmi @ 8da5ce5b95df7be870239c30c3362a1f437f690a (2026-08-02)
+pinned deliberately: the 2 commits immediately after this one
+(c2d0106, f143f84) reportedly broke the 720p runtime (video_output_rt) build.

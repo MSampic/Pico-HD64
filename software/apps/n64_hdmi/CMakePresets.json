@@ -1,0 +1,53 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "description": "Shared settings: Ninja generator, Pico SDK path, output to build/<preset>/",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "PICO_SDK_PATH": "$env{PICO_SDK_PATH}",
+        "PICO_BOARD": "pico2"
+      }
+    },
+    {
+      "name": "240p",
+      "displayName": "240p (single mode)",
+      "description": "Single fixed output mode: true 240p, 1:1 with the N64 capture",
+      "inherits": "base",
+      "cacheVariables": {
+        "N64_HDMI_MODE": "240P"
+      }
+    },
+    {
+      "name": "480p",
+      "displayName": "480p (single mode)",
+      "description": "Single fixed output mode: 2x2 upscale to 640x480",
+      "inherits": "base",
+      "cacheVariables": {
+        "N64_HDMI_MODE": "480P"
+      }
+    },
+    {
+      "name": "720p",
+      "displayName": "720p (single mode)",
+      "description": "Single fixed output mode: upscale to 1280x720",
+      "inherits": "base",
+      "cacheVariables": {
+        "N64_HDMI_MODE": "720P"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "240p", "configurePreset": "240p" },
+    { "name": "480p", "configurePreset": "480p" },
+    { "name": "720p", "configurePreset": "720p" }
+  ]
+}

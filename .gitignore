@@ -1,2 +1,15 @@
-.vscode
+# CMake/Pico build artifacts (any build-* dir, plus root-level ones from
+# configuring the top-level project directly)
 build
+build-*/
+_deps/
+generated/
+pioasm/
+pioasm-install/
+pico-sdk/
+
+# Output UF2s produced by build.ps1 (default -OutDir <repo>/uf2)
+uf2/
+
+# VS Code settings are versioned (needed for the Pico extension env)
+!.vscode/*
