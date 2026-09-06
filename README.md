@@ -39,10 +39,21 @@ different `pico_hdmi` library options, so there is no top-level app build):
 Both share the same source files; the single-mode define
 (`N64_HDMI_SINGLE_MODE`) compiles out the multi-mode-only parts.
 
+## N64_hdmi_osd_overlay variant
+
+This app has boot combo reset using joybus in case of failure or incompatible video mode:
+
+| Chord | Target mode |
+|---|---|
+| C-Up + C-Right | 720P |
+| C-Up + C-Down | 480P |
+| C-Up + C-Left | 240P |
+
 ## Known bugs
 
 - OSD text unreadable on 240p mode
 - 720p is not crisp horizontally as 240p or 480p
+- OSD menu opens even when not pressing the button combination
 
 ## Repository layout
 
@@ -70,23 +81,23 @@ the N64's video encoder):
 | GPIO 10 | Audio data | N64 serial audio DAC `SDAT` |
 | GPIO 11 | Audio bit clock | N64 serial audio DAC `BCLK` |
 | GPIO 20 | Controller 1 | N64 Joybus |
+| GPIO 21 | N64 Reset | N64 PIF |
 | GPIO 12–19 | HDMI output | HSTX TMDS pairs (see below) |
 | GPIO 28 | UART TX | Debug log, 115200 baud |
 
-**HDMI output pins (GPIO 12–19)** use `pico_hdmi`'s default HSTX pinout,
+**HDMI output pins (GPIO 12–19)** use `dvisock`'s default HSTX pinout,
 which matches this board's actual wiring — `main.c` does **not** call
 `video_output_set_hstx_pinout()`:
 
 ```
-GPIO12 = CLK-    GPIO13 = CLK+
-GPIO14 = D0-     GPIO15 = D0+
-GPIO16 = D1-     GPIO17 = D1+
-GPIO18 = D2-     GPIO19 = D2+
+GPIO12 = D0+    GPIO13 = D0-
+GPIO14 = CLK+     GPIO15 = CLK-
+GPIO16 = D2+     GPIO17 = D2-
+GPIO18 = D1+     GPIO19 = D1-
 ```
 
-This is **not** the old `dvi_serialiser` / PicoDVI-N64 "pico_sock_cfg" order
-(CLK=14, D0=12, D1=18, D2=16) — the board's DVI/HDMI socket is wired to the
-HSTX default order. If you build your own board with a different HSTX wiring
+This is the old PicoDVI-N64 "pico_sock_cfg" order
+(CLK=14, D0=12, D1=18, D2=16). If you build your own board with a different HSTX wiring
 you must call `video_output_set_hstx_pinout()` accordingly.
 
 ## Building
